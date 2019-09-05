@@ -34,11 +34,13 @@ list-iam-users
 list-iam-roles
 list-iam-policies
 list-iam-groups
-list-role-policies
+list-role-policies <role>
 
 get-user <user> [full]
 get-role <role> [full]
 get-policy <policy> [version]
+
+find-user <access_key_id>
 
 Advanced usage:
 
@@ -68,7 +70,12 @@ get_user_arn() {
 get_policy_arn() {
 	local policy="$1"
 	shift
-	"$aws" iam list-policies | jq -r ".Policies[]|if .PolicyName == \"$policy\" then .Arn else empty end"
+	local arn=$("$aws" iam list-policies | jq -r ".Policies[]|if .PolicyName == \"$policy\" then .Arn else empty end")
+	if [ -n "$arn" ]; then
+	    printf "%s\n" "$arn"
+	else
+	    fatal 'No policies found, possibly inline policy?'
+	fi
 }
 
 get_default_policy_version() {
@@ -83,6 +90,7 @@ list_policy() {
 	local version="$1"
 	shift
 	local arn="$(get_policy_arn $policy)"
+	[ -n "$arn" ] || exit 1
 	"$aws" iam get-policy --policy-arn "$arn"
 	"$aws" iam list-entities-for-policy --policy-arn "$arn"
 	[ "$version" == 'latest' ] && version="$(get_default_policy_version $policy)"
@@ -101,11 +109,33 @@ list_policies() {
 list_users() {
 	local users="$1"
 	shift
+	local inline_policies
+	local policy
+	shift
 	for user in $users; do
 		"$aws" iam list-attached-user-policies --user-name "$user"
-		"$aws" iam list-user-policies --user-name "$user"
+		inline_policies=$("$aws" iam list-user-policies --user-name "$user" | jq -r '.PolicyNames[]')
+		if [ -n "$inline_policies" ]; then
+		   for policy in $inline_policies; do
+		       "$aws" iam get-user-policy --user-name "$user" --policy-name "$policy"
+			done
+		fi
 		"$aws" iam list-groups-for-user --user-name "$user" | jq -r '.Groups[]|{ GroupName, Arn }'
 	done
+}
+
+find_user_by_id() {
+	local id="$1"
+	local users=$("$aws" iam list-users|jq -r '.Users[]|.UserName')
+	local found=
+	shift
+        if [ -n "$users" ]; then
+		for user in $users; do
+			found=$("$aws" iam list-access-keys --user-name "$user"|jq -r ".AccessKeyMetadata[]|if .AccessKeyId == \"$id\" then .UserName else empty end")
+			[ -n "$found" ] && break
+		done
+	fi
+	printf "Found %s\n" "${found-nothing}"
 }
 
 TEMP=$(getopt -n $PROG -o 'p:,h,V,j' -l 'profile:,help,version,json' -- "$@") ||
@@ -186,6 +216,16 @@ get-*)
 			;;
 		esac
 	fi
+	exit $?
+	;;
+find-user)
+	if [ "$#" -gt 0 ]; then
+		id="$1"
+		shift
+	else
+		fatal 'Missing user access key id'
+	fi
+	find_user_by_id "$id"
 	exit $?
 	;;
 *)
