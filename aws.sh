@@ -135,7 +135,7 @@ find_user_by_id() {
 			[ -n "$found" ] && break
 		done
 	fi
-	printf "Found %s\n" "${found-nothing}"
+	printf "Found %s\n" "${found:-nothing}"
 }
 
 TEMP=$(getopt -n $PROG -o 'p:,h,V,j' -l 'profile:,help,version,json' -- "$@") ||
