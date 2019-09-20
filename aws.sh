@@ -39,6 +39,7 @@ list-role-policies <role>
 get-user <user> [full]
 get-role <role> [full]
 get-policy <policy> [version]
+get-lb-name <tag>
 
 find-user <access_key_id>
 
@@ -133,6 +134,7 @@ find_user_by_id() {
 		for user in $users; do
 			found=$("$aws" iam list-access-keys --user-name "$user"|jq -r ".AccessKeyMetadata[]|if .AccessKeyId == \"$id\" then .UserName else empty end")
 			[ -n "$found" ] && break
+			printf '%s' '.'
 		done
 	fi
 	printf "Found %s\n" "${found:-nothing}"
@@ -195,6 +197,21 @@ list-role-policies)
 	role="$1"
 	shift
 	list_policies "$role"
+	exit $?
+	;;
+get-lb-name)
+	tag="$1"
+	shift
+	lbresource=$($aws elb describe-load-balancers --query 'LoadBalancerDescriptions[].LoadBalancerName' --output text)
+	if [ -n "$lbresource" ]; then
+		for lb in $lbresource; do
+			lbname=$($aws elb describe-tags --load-balancer-name "$lb" | jq -r  "map(select( any(.[].Tags[]; .Value==\"$tag\" )))[]| .[].LoadBalancerName")
+			if [ -n "$lbname" ]; then
+				jq -n --arg lb_name "$lbname" '{"name":$lb_name}'
+				exit 0
+			fi
+		done
+	fi
 	exit $?
 	;;
 get-*)
